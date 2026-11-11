@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Appliance utilization</title>
+  <link rel="icon" href="/static/favicon.png" type="image/png">
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="header">
+    <div class="brand">
+      <img class="mark" src="/static/favicon.png" alt="" width="32" height="32">
+      <div>
+        <h1>Appliance utilization</h1>
+        <p class="subtitle">Utilization, performance score, and uplink usage for Meraki appliances</p>
+      </div>
+    </div>
+    <span class="pill" id="key-pill">Read only</span>
+  </header>
+
+  <div class="layout">
+    <aside class="controls">
+      <section class="card">
+        <label for="org">Organization</label>
+        <select id="org" disabled></select>
+      </section>
+
+      <section class="card">
+        <div class="row-between">
+          <h2>Appliances</h2>
+          <button type="button" class="ghost small" id="clear-models">Clear</button>
+        </div>
+        <label class="check"><input type="checkbox" id="all-models"> <span>All models</span></label>
+        <div id="models" class="model-list" role="group" aria-label="Appliance models"></div>
+        <p class="hint" id="selection-hint"></p>
+      </section>
+
+      <section class="card">
+        <div class="row-between">
+          <h2>Time</h2>
+          <details class="info">
+            <summary aria-label="How utilization, the performance score, and uplink usage differ"><span aria-hidden="true">i</span></summary>
+            <div class="info-bubble">
+              <p><strong>Utilization</strong> is 0–100, every 20 minutes, for that appliance. It combines CPU use and peak bandwidth use. Only a primary MX returns it.</p>
+              <p><strong>Performance score</strong> is also 0–100, one score per step you choose, for that appliance. A warm spare does not support it.</p>
+              <p><strong>Uplink</strong> is Mbps sent and received on each WAN of the network. Appliances on the same network, including a spare, share these numbers.</p>
+              <p>Utilization and the score share the top chart. Uplink is the lower chart, on its own scale.</p>
+            </div>
+          </details>
+        </div>
+        <ol class="steps">
+          <li>
+            <div class="step-kicker"><span class="step-num">1</span><span class="step-title">Window</span></div>
+            <p class="step-note">How far back. Shared by all three series.</p>
+            <label class="visually-hidden" for="window">Window</label>
+            <select id="window"></select>
+          </li>
+          <li>
+            <div class="step-kicker"><span class="step-num">2</span><span class="step-title">Resolution</span></div>
+            <p class="step-note">How often. A shorter step means more points and more calls.</p>
+            <div class="series">
+              <div class="series-row">
+                <span class="series-name">Utilization</span>
+                <p class="series-fixed" id="util-resolution">20 min</p>
+                <p class="series-meta">Fixed · 1 call</p>
+              </div>
+              <div class="series-row">
+                <label for="perf-res">Performance</label>
+                <select id="perf-res"></select>
+                <p class="series-meta" id="perf-hint">1 call per appliance per point</p>
+              </div>
+              <div class="series-row">
+                <label for="uplink-res">Uplink</label>
+                <select id="uplink-res"></select>
+                <p class="series-meta" id="uplink-hint">1 call per network</p>
+              </div>
+            </div>
+          </li>
+        </ol>
+        <div class="plan" id="plan" hidden>
+          <p class="call-line" id="call-count"></p>
+          <p class="hint" id="call-split"></p>
+        </div>
+      </section>
+
+      <section class="card">
+        <label for="threshold">Highlight <strong id="threshold-value">50%</strong></label>
+        <input type="range" id="threshold" min="10" max="100" step="5" value="50">
+        <p class="hint">Utilization and score.</p>
+      </section>
+
+      <section class="card">
+        <button type="button" id="fetch" class="primary" disabled>Fetch</button>
+        <button type="button" id="cancel" class="secondary" hidden>Cancel fetch</button>
+      </section>
+    </aside>
+
+    <main class="content">
+      <div id="banner" class="banner" role="alert" hidden></div>
+
+      <section class="card progress-card" id="progress-card" hidden>
+        <div class="row-between">
+          <strong id="progress-title">Fetching</strong>
+          <span class="muted" id="progress-count"></span>
+        </div>
+        <progress id="progress" max="1" value="0"></progress>
+        <p class="status" id="status" role="status" aria-live="polite"></p>
+      </section>
+
+      <div id="empty" class="card empty">
+        Pick an organization and appliance models, set the window and resolutions, then click <strong>Fetch</strong>.
+      </div>
+
+      <div id="results" hidden>
+        <p class="meta" id="meta"></p>
+
+        <div class="counts" role="group" aria-label="Filter the table">
+          <button type="button" class="count" data-filter="all" aria-pressed="true">
+            <span class="count-value" id="count-all">0</span><span class="count-caption">Appliances</span>
+          </button>
+          <button type="button" class="count bad" data-filter="util" aria-pressed="false">
+            <span class="count-value" id="count-util">0</span><span class="count-caption">Utilization ≥ threshold</span>
+          </button>
+          <button type="button" class="count bad" data-filter="perf" aria-pressed="false">
+            <span class="count-value" id="count-perf">0</span><span class="count-caption">Score ≥ threshold</span>
+          </button>
+          <button type="button" class="count warn" data-filter="nodata" aria-pressed="false">
+            <span class="count-value" id="count-nodata">0</span><span class="count-caption">No utilization</span>
+          </button>
+        </div>
+
+        <div class="charts-grid">
+          <section class="card">
+            <div class="row-between wrap">
+              <div class="inline">
+                <h2>Hot spots</h2>
+                <div class="segmented" role="tablist" aria-label="Hot spots view">
+                  <button type="button" class="seg-btn" id="view-ranking" aria-selected="true">Ranking</button>
+                  <button type="button" class="seg-btn" id="view-heatmap" aria-selected="false">Heatmap</button>
+                </div>
+              </div>
+              <div class="inline">
+                <label for="metric" class="inline-label">Metric</label>
+                <select id="metric">
+                  <option value="util">Utilization %</option>
+                  <option value="perf">Performance score</option>
+                  <option value="uplink">Uplink Mbps (sent + received)</option>
+                </select>
+              </div>
+            </div>
+            <div id="ranking-wrap">
+              <p class="hint" id="ranking-caption"></p>
+              <div id="ranking" class="chart"></div>
+            </div>
+            <div id="heatmap-wrap" hidden>
+              <div class="row-between wrap">
+                <span class="label" id="heat-title">Over time</span>
+                <span id="heat-legend"></span>
+              </div>
+              <div id="heatmap" class="chart"></div>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="row-between wrap">
+              <div class="inline">
+                <h2 id="detail-title">Appliance detail</h2>
+                <details class="info">
+                  <summary aria-label="How utilization, the performance score, and uplink usage differ"><span aria-hidden="true">i</span></summary>
+                  <div class="info-bubble">
+                    <p><strong>Utilization</strong> is 0–100, every 20 minutes, for that appliance. It combines CPU use and peak bandwidth use. Only a primary MX returns it.</p>
+                    <p><strong>Performance score</strong> is also 0–100, one score per step you choose, for that appliance. A warm spare does not support it.</p>
+                    <p><strong>Uplink</strong> is Mbps sent and received on each WAN of the network. Appliances on the same network, including a spare, share these numbers.</p>
+                    <p>Utilization and the score share the top chart. Uplink is the lower chart, on its own scale.</p>
+                  </div>
+                </details>
+              </div>
+              <div class="inline">
+                <label for="detail-device" class="inline-label">Appliance</label>
+                <select id="detail-device"></select>
+                <button type="button" class="ghost small" id="series-csv">Series CSV</button>
+              </div>
+            </div>
+            <p class="hint" id="detail-facts"></p>
+            <div id="detail" class="chart"></div>
+            <p class="readout mono" id="readout">Point at the chart to read values.</p>
+          </section>
+        </div>
+
+        <section class="card table-card">
+          <div class="row-between wrap table-head">
+            <input type="search" id="filter" placeholder="Search appliance, model, network, serial" aria-label="Search the table">
+            <div class="inline">
+              <label class="check"><input type="checkbox" id="only-high"> <span>Only ≥ threshold</span></label>
+              <button type="button" class="ghost small" id="csv">Table CSV</button>
+            </div>
+          </div>
+          <p class="hint" id="table-caption"></p>
+          <div class="table-wrap"><table id="table"></table></div>
+        </section>
+
+        <section class="card" id="errors-panel" hidden>
+          <h2>Calls that failed</h2>
+          <div class="table-wrap short"><table id="errors"></table></div>
+        </section>
+      </div>
+    </main>
+  </div>
+</body>
+</html>
